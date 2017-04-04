@@ -1,0 +1,116 @@
+Authors:
+Salman Masood, Tanwee Kausar
+Fall 2016
+Operating Systems - Homework 2
+
+Files contained in this submission:
+1. fs/trfs -----> new filesytem source code
+2. hw2/treplay.c-------> Userland code to replay the recorded filesytem methods.
+3. hw2/trctl.c---------> Code to set/unset the tracing filesystem methods.
+4. README.HW2 -> This README file containing description of the assignment.
+
+TRFS is a new stackable file sytem which will trace and record various file system methods.
+We have intercepted following total 20 file system methods which can be directly mapped to system call:
+
+read, write,  open,  close, stat, fsync, rename, mkdir, rmdir, creat, link,
+unlink,symlink,readlink,chmod,mknod,setxattr ,getxattr,listxattr,removexattr.
+
+* log file path should be passed as a mandatory mount option like "‐o tfile=/path/name".
+* Records are written in binary format to a file residing outside of trfs and lower mounted file system.
+* Record format:
+record_ID - 4 bytes, record_size - 2 bytes, record_type - 2 bytes, (void)*arg1, (void)*arg2, (void)*arg3, pathlen, path 
+  for void arguments, size will be determined by type of filesystem method."
+* Each record  has a "record ID", a monotonically increasing sequence number to identify the sequential records.
+* Record size tells what follows in bytes for that record.
+* recording syscall that may fail e.g. if mkdir fails,recording that as well in trfs file
+* unmount also will write the remanining buffer into the log file.
+* Writing trfs related file system information like path of log file, map etc to private pointer of super block.
+* Spinlock is used while changing the super block parameters.
+
+
+ Design: 
+ 
+ When a file system method is called from userland it will be traced based on the map which will be set by trctl program. 
+ trace_record() function will write the record in compact binary format to the log file provided by the user.
+ This log file will be parsed by the treplay program and records can be replayed on the same environment where records were taken. 
+ Treplay program will also check the return values and display them according to the options given to it.
+ 
+
+ Steps to test as provided by professor:
+ 1. Create a directory with a bunch of existing files, folder, etc. and some content, say DIR1
+ 2. make a copy of DIR1 to DIR2
+ $ cp -a DIR1 DIR2
+ 3. mount trfs on top of DIR1, say /mnt/trfs Make sure log file is written anywhere outside DIR1 or DIR2. say /tmp/tfile
+ 4. cd /mnt/trfs
+ 5. run a bunch of unix commands to read, write, create, delete, rename, etc. files.
+ 6. unmount trfs
+ 7. cd DIR2
+ 8. run your replayer on the log file (/tmp/tfile) captured when trfs was mounted. It should perform normal syscalls on the files/dirs in DIR2.
+ 9. If all worked well, the contents of DIR1 and DIR2 should be as identical as possible."
+
+ Trctl:
+This program can be used to set/unset a particular file sytem method for tracing.
+ It is using 32 bit map. It will set the map in the filesystem using IOCTL() using following mapping:
+
+ TRFS_READ           0x01
+ TRFS_WRITE          0x02
+ TRFS_OPEN           0x04
+ TRFS_FILE_RELEASE   0x08
+ TRFS_GETATTR        0x10
+ TRFS_FSYNC          0x20
+ TRFS_RENAME         0x40
+ TRFS_MKDIR          0x80
+ TRFS_RMDIR          0x100
+ TRFS_CREAT          0x200
+ TRFS_LINK           0x400
+ TRFS_UNLINK         0x800
+ TRFS_SYMLINK        0x1000
+ TRFS_READLINK       0x2000
+ TRFS_SETATTR        0x4000
+ TRFS_MKNOD          0x8000
+ TRFS_SETXATTR       0x10000
+ TRFS_GETXATTR       0x20000
+ TRFS_LISTXATTR      0x40000
+ TRFS_REMOVEXATTR    0x80000
+ 
+ Usage:    ./trctl CMD /mounted/path
+ CMD can be:
+ all: to enable tracing for all f/s methods
+ none: to disable tracing for all f/s methods
+ 0xNN: hex number to pass bitmap of methods to trace or not"
+ 
+ ./trctl /mounted/path
+ should retrieve the current value of the bitmap and display it in hex.
+ 
+ Treplay
+ The program reads the tfile created by TRFS file system for tracing purpose.Usage of the program is:
+ 
+ $ ./treplay [‐ns] TFILE, where"
+ TFILE: the trace file to replay
+ ‐n: show the records captured by TRFS in tfile but do not replay them
+ ‐s: strict mode ‐‐ abort replaying as soon as a deviation occurs i.e. the new execution is different from the traced execution result
+ 
+ By default, treplay displays the details of records to be replayed and then replays the syscalls found in tfile. 
+ It displays the result of the syscalls being executed and compares the return values
+ with the original return values stored in the tfile. If comparison shows different results, 
+ then it moves to the next record in tfile and repeat the operations - reading,displaying and execution.
+ If user gives -s option, then if compared return values do not match,treplay terminates the program.
+ If user gives -n option, treplay only reads and displays the records . It doesn't replay them.
+
+ There are cases where multiple files get opened . For that case, treplay has maintained open-close consistency. 
+ It maps filepointer given in the tfile for a particular file to its file descriptor in the userland.
+
+Special points:
+1. Wrote a generic function in kernel. Which makes the code clean without much checks inside filesystem methods. 
+ We are calling same function inside every file system method with different parameters.
+2. We are using system call numbers defined in ""arch/x86/include/generated/uapi/asm/unistd_64.h"" 
+ and calling using the same from treplay. Hence keeping maping clear thoughout project.
+3. New filesystem methods can be traced with minimal changes in the code because of its generic implementation.
+4. We are preserving the type of argument by type casting it into void pointer and then casting it back to its original type.
+5. We are using auxilary buffer which will be written using linux defined work queue to write into log file asynchronously using single thread.
+
+
+Limitations/challenges:
+1. symlink supported in same mount point only.
+2. Different types of structures in  sys_stat() and trfs_getattr(). size of struct kstat  = 104, Size of struct stat=144. This special case has been handled."
+
